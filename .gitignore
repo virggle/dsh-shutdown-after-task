@@ -1,0 +1,4 @@
+node_modules/
+*.tgz
+.npm-cache/
+.awesome-tmp/
