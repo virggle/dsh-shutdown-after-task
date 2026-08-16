@@ -1,0 +1,32 @@
+{
+  "name": "dsh-shutdown-after-task",
+  "version": "0.1.0",
+  "description": "Shut down Windows after DeepSeek Harness tasks complete — button-armed, cancellable countdown. 任务完成后自动关机（按钮开启，倒计时可取消）。",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md",
+    "README.en.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "shutdown",
+    "power",
+    "task-complete",
+    "auto-shutdown",
+    "关机"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
