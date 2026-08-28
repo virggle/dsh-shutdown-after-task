@@ -1,7 +1,7 @@
 {
   "name": "dsh-shutdown-after-task",
-  "version": "0.1.0",
-  "description": "Shut down Windows after DeepSeek Harness tasks complete — button-armed, cancellable countdown. 任务完成后自动关机（按钮开启，倒计时可取消）。",
+  "version": "0.2.0",
+  "description": "Shut down Windows after DeepSeek Harness tasks complete — draggable button, auto-dodge, cancellable countdown. 任务完成后自动关机（按钮可拖动、自动避让，倒计时可取消）。",
   "main": "index.js",
   "files": [
     "index.js",
@@ -23,6 +23,14 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/virggle/dsh-shutdown-after-task.git"
+  },
+  "homepage": "https://github.com/virggle/dsh-shutdown-after-task",
+  "bugs": {
+    "url": "https://github.com/virggle/dsh-shutdown-after-task/issues"
   },
   "dsh": {
     "bundle": {
