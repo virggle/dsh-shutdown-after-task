@@ -11,11 +11,16 @@ computer shuts down once the tasks finish — with a cancellable countdown.
 
 ## Features
 
-- **Floating text button** (bottom-right): toggles the "shutdown after task
-  completes" mode. Off by default — never arms itself.
+- **Floating text button (draggable)**: toggles the "shutdown after task
+  completes" mode. Off by default — never arms itself. Drag it anywhere; the
+  position is remembered.
+- **Auto-dodge**: when another plugin's corner popup (e.g. a price notice with
+  a button) overlaps the button, the button steps aside automatically and
+  returns once the popup is gone.
 - **Cancellable countdown**: when the task completes, a 60 s banner shows the
   remaining seconds with a **Cancel shutdown** button (`POST /cancel` →
   `shutdown /a`) — no reliance on the OS notification that cannot be cancelled.
+  The banner is anchored to the button's current position.
 - **New-task interrupt**: starting a new task during the countdown aborts the
   shutdown automatically while keeping the mode armed.
 - **Cancel exits the mode**: clicking "Cancel shutdown" aborts this shutdown
@@ -27,17 +32,25 @@ computer shuts down once the tasks finish — with a cancellable countdown.
 
 ## Install
 
+npm (recommended, published):
+
 ```sh
-dsh plugin --profile web add github:<owner>/dsh-shutdown-after-task
+dsh plugin --profile web add dsh-shutdown-after-task
+```
+
+or from GitHub:
+
+```sh
+dsh plugin --profile web add github:virggle/dsh-shutdown-after-task
 ```
 
 Restart DSH, then refresh the page (Ctrl+R) if the button does not appear.
 
 ## Usage
 
-1. Click "任务完成后关机" — the button turns yellow (armed).
+1. Click "任务完成后关机" — the button turns yellow (armed). Drag it anywhere.
 2. Run your tasks.
-3. All root sessions idle with no errors → countdown banner appears.
+3. All root sessions idle with no errors → countdown banner appears above the button.
 4. Click "取消关机 / Cancel shutdown" to abort this shutdown and exit the mode;
    or let the countdown run out — the computer shuts down.
 
