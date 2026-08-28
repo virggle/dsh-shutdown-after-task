@@ -4,12 +4,16 @@
  *
  * A zero-dependency cordis plugin for the DeepSeek Harness web profile:
  *   - A floating "任务完成后关机 / Shutdown after task" text button sits at the
- *     bottom-right of the GUI. Click it to arm (or disarm) "shutdown after the
- *     task completes".
+ *     bottom-right of the GUI (draggable — position persisted in localStorage).
+ *     Click it to arm (or disarm) "shutdown after the task completes".
+ *   - Auto-dodge: when another plugin's corner popup (fixed overlay with
+ *     clickable content) overlaps the button, the button steps aside and
+ *     returns once the popup is gone.
  *   - When armed, once ALL root sessions go idle with no agent/error in the
  *     batch, a 60 s cancellable countdown starts and `shutdown /s /t <n>` is
  *     issued. The GUI banner shows the remaining seconds with a "取消关机 /
- *     Cancel shutdown" button (POST /cancel → `shutdown /a`).
+ *     Cancel shutdown" button (POST /cancel → `shutdown /a`); the banner is
+ *     anchored above the button wherever it currently sits.
  *   - Starting a new task during the countdown also aborts the shutdown
  *     automatically while keeping the mode armed.
  *   - Clicking "Cancel shutdown" aborts THIS shutdown AND disarms the mode.
@@ -74,6 +78,7 @@ const UI_JS = `
   window.__dshSatLoaded = true
   var BASE = '/api/dsh-shutdown-after-task'
   var btn = null, banner = null, note = null, noteTimer = null
+  var suppressClick = false, dodging = false, drag = null, scanTimer = null
 
   function makeEl(tag, cls, text) {
     var e = document.createElement(tag)
@@ -86,14 +91,15 @@ const UI_JS = `
 
   var style = document.createElement('style')
   style.textContent = [
-    '.dsh-sat-btn{position:fixed;right:16px;bottom:16px;z-index:2147483000;pointer-events:auto;cursor:pointer;',
+    '.dsh-sat-btn{position:fixed;right:16px;bottom:16px;z-index:2147483000;pointer-events:auto;cursor:grab;touch-action:none;',
     'border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:8px 16px;font:13px/1.4 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;',
     'color:#c9c9d4;background:rgba(24,24,30,.85);box-shadow:0 4px 16px rgba(0,0,0,.35);backdrop-filter:blur(8px);user-select:none;',
-    'transition:background .15s,color .15s}',
+    'transition:background .15s,color .15s,transform .18s ease}',
+    '.dsh-sat-btn:active{cursor:grabbing}',
     '.dsh-sat-btn:hover{color:#fff;background:rgba(38,38,48,.9)}',
     '.dsh-sat-btn.on{color:#0f0f12;background:#ffd166;border-color:rgba(255,209,102,.5)}',
     '.dsh-sat-btn.on:hover{background:#ffdf8a}',
-    '.dsh-sat-panel{position:fixed;right:16px;bottom:64px;z-index:2147483000;pointer-events:auto;display:none;',
+    '.dsh-sat-panel{position:fixed;z-index:2147483000;pointer-events:auto;display:none;',
     'width:300px;background:rgba(17,17,22,.94);color:#f2f2f4;border:1px solid rgba(255,255,255,.14);border-radius:12px;',
     'padding:14px 16px;font:13px/1.5 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;',
     'box-shadow:0 8px 30px rgba(0,0,0,.45);backdrop-filter:blur(10px)}',
@@ -109,10 +115,6 @@ const UI_JS = `
 
   btn = makeEl('button', 'dsh-sat-btn', '任务完成后关机')
   btn.setAttribute('type', 'button')
-  btn.addEventListener('click', function () {
-    var on = btn.classList.contains('on')
-    post(on ? '/disarm' : '/arm').then(function (s) { if (s) applyState(s) })
-  })
   document.body.appendChild(btn)
 
   banner = makeEl('div', 'dsh-sat-panel')
@@ -128,20 +130,159 @@ const UI_JS = `
   note = makeEl('div', 'dsh-sat-panel warn')
   document.body.appendChild(note)
 
+  // ---- restore saved drag position ----
+  try {
+    var saved = JSON.parse(localStorage.getItem('dsh-sat-pos') || 'null')
+    if (saved && typeof saved.l === 'number' && typeof saved.t === 'number') {
+      btn.style.left = saved.l + 'px'
+      btn.style.top = saved.t + 'px'
+      btn.style.right = 'auto'
+      btn.style.bottom = 'auto'
+    }
+  } catch (e) { /* ignore */ }
+
+  // ---- draggable: pointer events; a real drag suppresses the click ----
+  btn.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return
+    undodge()
+    drag = { sx: e.clientX, sy: e.clientY, l: btn.offsetLeft, t: btn.offsetTop, moved: false }
+    try { btn.setPointerCapture(e.pointerId) } catch (err) { /* ignore */ }
+  })
+  btn.addEventListener('pointermove', function (e) {
+    if (!drag) return
+    if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true
+    if (!drag.moved) return
+    var l = Math.min(Math.max(8, drag.l + e.clientX - drag.sx), window.innerWidth - btn.offsetWidth - 8)
+    var t = Math.min(Math.max(8, drag.t + e.clientY - drag.sy), window.innerHeight - btn.offsetHeight - 8)
+    btn.style.left = l + 'px'
+    btn.style.top = t + 'px'
+    btn.style.right = 'auto'
+    btn.style.bottom = 'auto'
+  })
+  function endDrag() {
+    if (!drag) return
+    suppressClick = drag.moved
+    if (drag.moved) {
+      try { localStorage.setItem('dsh-sat-pos', JSON.stringify({ l: btn.offsetLeft, t: btn.offsetTop })) } catch (err) { /* ignore */ }
+    }
+    drag = null
+  }
+  btn.addEventListener('pointerup', endDrag)
+  btn.addEventListener('pointercancel', endDrag)
+  btn.addEventListener('click', function () {
+    if (suppressClick) { suppressClick = false; return }
+    var on = btn.classList.contains('on')
+    post(on ? '/disarm' : '/arm').then(function (s) { if (s) applyState(s) })
+  })
+
+  // ---- auto-dodge: step aside when another plugin's fixed popup with
+  //      clickable content overlaps our button; restore when it goes away ----
+  function isOurs(el) {
+    return el === btn || el === banner || el === note ||
+      (btn && btn.contains(el)) || (banner && banner.contains(el)) || (note && note.contains(el))
+  }
+  function fixedOverlay(el) {
+    var cur = el
+    while (cur && cur.nodeType === 1 && cur !== document.documentElement) {
+      if (isOurs(cur)) return null
+      var st = window.getComputedStyle(cur)
+      if (st.position === 'fixed' && st.display !== 'none' && st.visibility !== 'hidden') return cur
+      cur = cur.parentElement
+    }
+    return null
+  }
+  function clickableAt(el) {
+    var t = el && el.tagName
+    if (!t) return false
+    if (t === 'BUTTON' || t === 'A' || t === 'INPUT' || t === 'SELECT' || el.getAttribute('role') === 'button') return true
+    return typeof el.onclick === 'function'
+  }
+  function area(r) { return Math.max(0, r.right - r.left) * Math.max(0, r.bottom - r.top) }
+  function intersectArea(a, b) {
+    var w = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+    var h = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+    return w * h
+  }
+  function findIntruder() {
+    if (!btn) return null
+    var r = btn.getBoundingClientRect()
+    if (r.width < 4 || r.height < 4) return null
+    var pts = [
+      [r.left + r.width / 2, r.top + r.height / 2],
+      [r.left + 2, r.top + 2], [r.right - 2, r.top + 2],
+      [r.left + 2, r.bottom - 2], [r.right - 2, r.bottom - 2]
+    ]
+    for (var i = 0; i < pts.length; i++) {
+      var chain = document.elementsFromPoint(pts[i][0], pts[i][1])
+      for (var j = 0; j < chain.length; j++) {
+        var el = chain[j]
+        if (el === btn || isOurs(el)) continue
+        var ov = fixedOverlay(el)
+        if (!ov || !clickableAt(el)) continue
+        var or = ov.getBoundingClientRect()
+        if (intersectArea(or, r) > area(r) * 0.3) return ov
+      }
+    }
+    return null
+  }
+  function undodge() {
+    if (dodging) { btn.style.transform = ''; dodging = false }
+  }
+  function dodgeScan() {
+    if (!btn || drag) return
+    var intr = findIntruder()
+    if (intr && !dodging) {
+      var br = btn.getBoundingClientRect()
+      var ir = intr.getBoundingClientRect()
+      var off = Math.max(0, br.bottom - ir.top) + 14
+      btn.style.transform = 'translateY(-' + off + 'px)'
+      dodging = true
+    } else if (!intr && dodging) {
+      btn.style.transform = ''
+      dodging = false
+    }
+  }
+  try {
+    var mo = new MutationObserver(function () {
+      clearTimeout(scanTimer)
+      scanTimer = setTimeout(dodgeScan, 250)
+    })
+    mo.observe(document.body, { childList: true, subtree: true })
+  } catch (e) { /* ignore */ }
+
+  // ---- countdown/notice panel follows the button's current position ----
+  function placePanel(panelEl) {
+    var r = btn.getBoundingClientRect()
+    var pw = panelEl.offsetWidth || 300
+    var ph = panelEl.offsetHeight || 120
+    panelEl.style.right = 'auto'
+    panelEl.style.bottom = 'auto'
+    panelEl.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8)) + 'px'
+    var top = r.top - ph - 10
+    panelEl.style.top = (top >= 8 ? top : r.bottom + 10) + 'px'
+  }
+
   function showBanner(title, body, cls, showCancel) {
     banner.className = 'dsh-sat-panel' + (cls ? ' ' + cls : '')
     banner.querySelector('.t').textContent = title
     banner.querySelector('.b').textContent = body
     setVisible(cancelBtn, !!showCancel)
+    placePanel(banner)
     setVisible(banner, true)
   }
   function hideBanner() { setVisible(banner, false) }
   function showNote(text, ms) {
     note.querySelector('.t').textContent = text
+    placePanel(note)
     setVisible(note, true)
     clearTimeout(noteTimer)
     noteTimer = setTimeout(function () { setVisible(note, false) }, ms || 6000)
   }
+  window.addEventListener('resize', function () {
+    if (banner && banner.style.display === 'block') placePanel(banner)
+    if (note && note.style.display === 'block') placePanel(note)
+    dodgeScan()
+  })
 
   function applyState(s) {
     if (!s) return
@@ -165,6 +306,7 @@ const UI_JS = `
   }
   tick()
   setInterval(tick, 1000)
+  setInterval(dodgeScan, 1000)
 })();
 `
 
